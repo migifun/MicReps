@@ -1,0 +1,4 @@
+// このMac専用の署名。再ビルドのたびにマイクの許可を聞かれるのを避けたい場合は、
+// 次の2行を CODE_SIGN_IDENTITY = Apple Development / DEVELOPMENT_TEAM = <チームID> に変える。
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
