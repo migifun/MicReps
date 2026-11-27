@@ -10,10 +10,11 @@ struct AppModelTests {
     let capture = FakeCapture()
     let transcriber = FakeTranscriber()
     let generator = FakeGenerator()
+    let reviewer = FakeReviewer()
 
     init() throws {
         paths = try makePaths()
-        model = try AppModel(paths: paths, capture: capture, transcriber: transcriber, generator: generator, reviewer: FakeReviewer())
+        model = try AppModel(paths: paths, capture: capture, transcriber: transcriber, generator: generator, reviewer: reviewer)
     }
 
     private func record(seconds: Double) async throws -> Recording {
@@ -191,5 +192,33 @@ struct AppModelTests {
         await model.queue.waitUntilIdle()
         #expect(recording.chapterState == .tooShort)
         #expect(generator.calls == 0)
+    }
+
+    @Test func 後の段階の最中に頼んだ章の作り直しも行う() async throws {
+        // 長い文があると、章が無くても見直し(言い直しの例)が走る。
+        var speech = longSpeech()
+        speech[11].text = "これは11番目の話です" + String(repeating: "とても長い説明を続けています", count: 7) + "。"
+        transcriber.result = .success(speech)
+        generator.answer = { _ in throw ChapterError.refused }
+        let model = model, generator = generator
+        reviewer.once = {
+            // 章の作成に失敗し、見直しをしている最中に「もう一度試す」を押す。
+            generator.answer = { _ in [
+                ChapterProposal(title: "最初", firstSentence: "これは0番目の話です。"),
+                ChapterProposal(title: "後半", firstSentence: "これは6番目の話です。"),
+            ] }
+            guard let recording = try? model.store.all().first else { return }
+            #expect(recording.chapterState == .failed)
+            #expect(model.queue.currentID == recording.id)
+            model.requestChapterRegeneration(recording)
+        }
+        let recording = try await record(seconds: 60)
+        await model.queue.waitUntilIdle()
+        #expect(reviewer.once == nil)
+        #expect(recording.chapterState == .done)
+        #expect(recording.chapters.map(\.title) == ["最初", "後半"])
+        #expect(!model.queue.isQueued(recording.id))
+        // 済んでいた文字起こしはやり直さない。
+        #expect(transcriber.calls.count == 1)
     }
 }

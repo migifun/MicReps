@@ -33,8 +33,10 @@ final class ProcessingQueue {
 
     func isQueued(_ id: UUID) -> Bool { currentID == id || waiting.contains(id) }
 
+    /// 処理中の録音も積み直す。後の段階の最中に前の段階のやり直しを頼まれたとき、取りこぼさないため。
+    /// 各段階は始める前に要否を確かめるので、済んだ段階は飛ばされる。
     func enqueue(_ id: UUID) {
-        guard !isQueued(id) else { return }
+        guard !waiting.contains(id) else { return }
         waiting.append(id)
         guard worker == nil else { return }
         worker = Task { [weak self] in

@@ -141,6 +141,7 @@ final class FakeReviewer: SentenceReviewer, @unchecked Sendable {
     private var _refused: Set<String> = []
     private var _roles = 0
     private var _rewrites = 0
+    private var _once: (@MainActor @Sendable () -> Void)?
 
     var reason: String? {
         get { lock.withLock { _reason } }
@@ -151,18 +152,33 @@ final class FakeReviewer: SentenceReviewer, @unchecked Sendable {
         get { lock.withLock { _refused } }
         set { lock.withLock { _refused = newValue } }
     }
+    /// 次に答える直前に一度だけ、主スレッドで行う(処理の途中の操作を再現する)。
+    var once: (@MainActor @Sendable () -> Void)? {
+        get { lock.withLock { _once } }
+        set { lock.withLock { _once = newValue } }
+    }
     var roleCalls: Int { lock.withLock { _roles } }
     var rewriteCalls: Int { lock.withLock { _rewrites } }
 
     func unavailableReason(for locale: Locale) -> String? { reason }
 
+    private func runOnce() async {
+        let work: (@MainActor @Sendable () -> Void)? = lock.withLock {
+            defer { _once = nil }
+            return _once
+        }
+        if let work { await work() }
+    }
+
     func role(of sentence: String, topic: String) async throws -> SentenceRole {
+        await runOnce()
         lock.withLock { _roles += 1 }
         if refused.contains(where: { sentence.contains($0) }) { throw ReviewError.refused }
         return sentence.contains("雑談") ? .aside : .main
     }
 
     func rewrite(_ sentence: String) async throws -> String {
+        await runOnce()
         lock.withLock { _rewrites += 1 }
         if refused.contains(where: { sentence.contains($0) }) { throw ReviewError.refused }
         return "例:" + sentence.prefix(10)
